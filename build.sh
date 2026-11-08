@@ -208,7 +208,21 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export LC_ALL=C
 
-apt-get update
+# Network hiccups: retry each download, and retry the whole install
+cat > /etc/apt/apt.conf.d/80-retries <<'EOF'
+Acquire::Retries "10";
+Acquire::https::Timeout "60";
+EOF
+retry() {
+  local n=1
+  until "$@"; do
+    [ "$n" -ge 4 ] && return 1
+    echo "### attempt $n failed, retrying in 20 s: $*"
+    n=$((n + 1)); sleep 20
+  done
+}
+
+retry apt-get update
 
 # Locales: English UI + Armenian
 sed -i -e 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' -e 's/^# *\(hy_AM.UTF-8 UTF-8\)/\1/' /etc/locale.gen
@@ -234,7 +248,7 @@ want() {
   done
 }
 
-apt-get -y install --no-install-recommends $(want \
+retry apt-get -y install --no-install-recommends $(want \
   sudo network-manager wpasupplicant wireless-regdb iw rfkill \
   kmod udev dbus-user-session systemd-timesyncd \
   console-setup keyboard-configuration tzdata \
@@ -243,7 +257,7 @@ apt-get -y install --no-install-recommends $(want \
   nano less bash-completion curl wget unzip \
   alsa-utils pciutils usbutils)
 
-apt-get -y install $(want \
+retry apt-get -y install $(want \
   xserver-xorg-core xserver-xorg-input-libinput xserver-xorg-input-synaptics \
   lightdm lightdm-gtk-greeter \
   xfce4 xfce4-terminal xfce4-power-manager xfce4-pulseaudio-plugin \
