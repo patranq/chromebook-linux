@@ -226,16 +226,24 @@ XKBOPTIONS="grp:alt_shift_toggle"
 BACKSPACE="guess"
 EOF
 
-apt-get -y install --no-install-recommends \
+# Only ask apt for packages that exist (a missing one would stop everything)
+want() {
+  for p in "$@"; do
+    if apt-cache show "$p" >/dev/null 2>&1; then echo "$p"
+    else echo "MISSING PACKAGE (skipped): $p" >&2; fi
+  done
+}
+
+apt-get -y install --no-install-recommends $(want \
   sudo network-manager wpasupplicant wireless-regdb iw rfkill \
   kmod udev dbus-user-session systemd-timesyncd \
   console-setup keyboard-configuration tzdata \
   zram-tools rsync cgpt vboot-kernel-utils gdisk fdisk parted \
   e2fsprogs dosfstools exfatprogs ntfs-3g \
   nano less bash-completion curl wget unzip \
-  alsa-utils pciutils usbutils
+  alsa-utils pciutils usbutils)
 
-apt-get -y install \
+apt-get -y install $(want \
   xserver-xorg-core xserver-xorg-input-libinput xserver-xorg-input-synaptics \
   lightdm lightdm-gtk-greeter \
   xfce4 xfce4-terminal xfce4-power-manager xfce4-pulseaudio-plugin \
@@ -245,12 +253,16 @@ apt-get -y install \
   firefox-esr \
   libreoffice-writer libreoffice-calc libreoffice-gtk3 \
   fonts-noto-core fonts-dejavu fonts-liberation2 \
-  gvfs gvfs-backends udisks2 xdg-user-dirs
+  gvfs gvfs-backends udisks2 xdg-user-dirs)
 
 apt-get -y clean
 CHROOT
 chmod 755 "$ROOT/tmp/setup.sh"
-chroot "$ROOT" /tmp/setup.sh
+chroot "$ROOT" /tmp/setup.sh 2>&1 | tee "$OUT/packages-log.txt"
+grep 'MISSING PACKAGE' "$OUT/packages-log.txt" >> "$INFO" || true
+for t in cgpt vbutil_kernel; do
+  chroot "$ROOT" sh -c "command -v $t" >/dev/null || info "WARNING: $t is not in the image"
+done
 rm -f "$ROOT/tmp/setup.sh"
 
 ###########################################################################
