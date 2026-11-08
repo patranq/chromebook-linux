@@ -1,0 +1,46 @@
+name: Build Chromebook Linux image
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - name: Get the files
+        uses: actions/checkout@v4
+
+      - name: Free disk space on the build machine
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune -af || true
+          df -h /
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libelf-dev libssl-dev \
+            cpio kmod jq curl xz-utils debootstrap debian-archive-keyring \
+            gdisk dosfstools mtools e2fsprogs rsync vboot-kernel-utils
+
+      - name: Build kernel, Debian and the disk image
+        run: sudo -E bash ./build.sh
+
+      - name: Save the disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: chromebook-debian-image
+          path: out/chromebook-debian.img
+          compression-level: 6
+          retention-days: 14
+
+      - name: Save build information
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-info
+          path: out/*.txt
+          retention-days: 14
