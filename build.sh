@@ -1,8 +1,9 @@
 #!/bin/bash
-# Builds a Debian 13 (trixie) + Xfce disk image for the
+# Builds a 32-bit Debian 12 (bookworm, i386) + Xfce disk image for the
 # Samsung Series 5 Chromebook XE500C21 ("Alex", Intel Atom N570).
 #
-#  * 64-bit mainline LTS kernel, no initramfs (disk/USB drivers built in)
+#  * 32-bit mainline LTS kernel (same kind as ChromeOS's own kernel on this
+#    machine), no initramfs (disk/USB drivers built in)
 #  * Disk layout of the image:
 #      p1  KERN-A   32 MiB  ChromeOS kernel partition (filled later on the
 #                           Chromebook by sign-kernel.sh)
@@ -17,7 +18,9 @@
 set -euo pipefail
 
 KERNEL_SERIES="${KERNEL_SERIES:-6.12}"
-SUITE="${SUITE:-trixie}"
+SUITE="${SUITE:-bookworm}"
+DEB_ARCH="${DEB_ARCH:-i386}"
+export ARCH=i386          # kernel architecture (32-bit x86)
 MIRROR="${MIRROR:-https://deb.debian.org/debian}"
 USERNAME="${USERNAME:-anna}"
 PASSWORD="${PASSWORD:-anna}"
@@ -38,6 +41,8 @@ info() { echo "$*" | tee -a "$INFO"; }
 die()  { echo "FATAL: $*" | tee -a "$INFO"; exit 1; }
 
 [ "$(id -u)" = 0 ] || die "run as root"
+# 32-bit kernel build on a 64-bit machine needs the multilib compiler bits
+apt-get install -y gcc-multilib >/dev/null 2>&1 || info "note: gcc-multilib could not be installed"
 NPROC="$(nproc)"
 
 ###########################################################################
@@ -66,12 +71,15 @@ cd "linux-$KVER"
 ###########################################################################
 log "2. Kernel configuration"
 ###########################################################################
-make x86_64_defconfig
+make i386_defconfig
 S=scripts/config
 
 # Small, simple, predictable boot
 $S --set-str LOCALVERSION "-alex" --disable LOCALVERSION_AUTO
 $S --disable RANDOMIZE_BASE
+# 32-bit specifics: Atom N570, 2 GB RAM
+$S --disable NOHIGHMEM --enable HIGHMEM4G --disable HIGHMEM64G
+$S --disable M486 --disable M586 --disable M686 --enable MATOM
 $S --enable KERNEL_XZ --disable KERNEL_GZIP
 $S --enable CC_OPTIMIZE_FOR_SIZE --disable CC_OPTIMIZE_FOR_PERFORMANCE
 $S --enable IKCONFIG --enable IKCONFIG_PROC
@@ -116,7 +124,8 @@ done
 make olddefconfig
 
 bad=0
-for o in ATA SATA_AHCI SCSI BLK_DEV_SD USB USB_EHCI_HCD USB_UHCI_HCD \
+for o in X86_32 HIGHMEM4G \
+         ATA SATA_AHCI SCSI BLK_DEV_SD USB USB_EHCI_HCD USB_UHCI_HCD \
          USB_STORAGE EXT4_FS DEVTMPFS UNIX DRM_I915 FRAMEBUFFER_CONSOLE \
          SERIO_I8042 KEYBOARD_ATKBD; do
   grep -q "^CONFIG_$o=y" .config || { info "MISSING (must be built in): $o"; bad=1; }
@@ -174,13 +183,14 @@ cleanup_mounts() {
 }
 trap cleanup_mounts EXIT
 
+unset ARCH   # only the kernel build needs it
 rm -rf "$ROOT"
 BASE_INC="ca-certificates,locales,systemd-sysv,dbus"
-if ! debootstrap --arch=amd64 --components=main,contrib,non-free-firmware \
+if ! debootstrap --arch="$DEB_ARCH" --components=main,contrib,non-free-firmware \
        --include="$BASE_INC" "$SUITE" "$ROOT" "$MIRROR"; then
   info "WARNING: debootstrap with signature check failed, retrying over HTTPS without it"
   rm -rf "$ROOT"
-  debootstrap --arch=amd64 --no-check-gpg --components=main,contrib,non-free-firmware \
+  debootstrap --arch="$DEB_ARCH" --no-check-gpg --components=main,contrib,non-free-firmware \
     --include="$BASE_INC" "$SUITE" "$ROOT" "$MIRROR"
 fi
 
